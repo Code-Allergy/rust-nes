@@ -31,7 +31,7 @@ pub struct NesRom {
     flags10:u8,
 }
 
-fn combine_bytes_to_u16(high: u8, low: u8) -> u16 {
+pub fn combine_bytes_to_u16(high: u8, low: u8) -> u16 {
     // Use bitwise OR to combine the bytes into a u16 value
     let result = ((high as u16) << 8) | low as u16;
     result

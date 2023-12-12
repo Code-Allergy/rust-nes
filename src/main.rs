@@ -1,27 +1,31 @@
 extern crate sdl2;
 
-use std::{fs, io};
+use nesemu::cpu::{AddressingMode, Instructions, NesCpu, CLOCK_RATE};
+use nesemu::parse_bin_file;
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+use sdl2::pixels::Color;
 use std::fs::File;
 use std::io::Read;
 use std::thread::sleep;
-use sdl2::pixels::Color;
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
 use std::time::Duration;
-use nesemu::{parse_bin_file};
-use nesemu::cpu::{CLOCK_RATE, NesCpu};
-
+use std::{fs, io};
+const SIM_CLOCK_RATE: i32 = 50;
 
 pub fn main() {
-    let rom = parse_bin_file("test-bin/branch_timing_tests/Branch_Basics.nes").expect("TODO: panic message");
+    // let rom = parse_bin_file("test-bin/branch_timing_tests/Branch_Basics.nes")
+    //     .expect("TODO: panic message");
     // let rom = parse_bin_file("test-bin/genuine/SMB1.nes").expect("Fart brains");
+    let rom = parse_bin_file("test-bin/nestest.nes").expect("Fart brains");
     let mut cpu = NesCpu::new();
     cpu.load_rom(&rom);
-
+    // cpu.load_bytes(&test_branch());
+    // cpu.memory.dump_to_file("Memout.bin").expect("FUCK");
     loop {
         cpu.fetch_decode_next();
-        sleep(Duration::from_secs_f64(1.0 / CLOCK_RATE as f64));
+        sleep(Duration::from_secs_f64(1.0 / SIM_CLOCK_RATE as f64));
     }
+
     // cpu.memory.dump_to_file("some.bin").expect("Failed to write some");
     // dbg!(rom);
     // sdl_display();
@@ -31,7 +35,8 @@ pub fn sdl_display() {
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
-    let window = video_subsystem.window("rust-sdl2 demo", 256, 240)
+    let window = video_subsystem
+        .window("rust-sdl2 demo", 256, 240)
         .position_centered()
         .build()
         .unwrap();
@@ -49,10 +54,11 @@ pub fn sdl_display() {
         canvas.clear();
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit {..} |
-                Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
-                    break 'running
-                },
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => break 'running,
                 _ => {}
             }
         }
@@ -63,3 +69,58 @@ pub fn sdl_display() {
     }
 }
 
+fn test_branch() -> [u8; 32] {
+    let mut operations = [0u8; 32];
+    operations[0] = NesCpu::encode((Instructions::LoadAccumulator, AddressingMode::Immediate));
+    operations[1] = 128;
+
+    operations[2] = NesCpu::encode((
+        Instructions::PushAccumulatorOnStack,
+        AddressingMode::Implied,
+    ));
+    operations[3] = NesCpu::encode((Instructions::LoadAccumulator, AddressingMode::Immediate));
+    operations[4] = 4;
+    operations[5] = NesCpu::encode((
+        Instructions::PushAccumulatorOnStack,
+        AddressingMode::Implied,
+    ));
+    operations[6] = NesCpu::encode((Instructions::LoadAccumulator, AddressingMode::Immediate));
+    operations[7] = 3;
+    operations[8] = NesCpu::encode((
+        Instructions::PushAccumulatorOnStack,
+        AddressingMode::Implied,
+    ));
+    operations[9] = NesCpu::encode((Instructions::LoadAccumulator, AddressingMode::Immediate));
+    operations[10] = 2;
+    operations[11] = NesCpu::encode((
+        Instructions::PushAccumulatorOnStack,
+        AddressingMode::Implied,
+    ));
+    operations[12] = NesCpu::encode((Instructions::LoadAccumulator, AddressingMode::Immediate));
+    operations[13] = 1;
+    operations[14] = NesCpu::encode((
+        Instructions::PushAccumulatorOnStack,
+        AddressingMode::Implied,
+    ));
+    operations[15] = NesCpu::encode((
+        Instructions::PullAccumulatorFromStack,
+        AddressingMode::Implied,
+    ));
+    operations[16] = NesCpu::encode((
+        Instructions::PullAccumulatorFromStack,
+        AddressingMode::Implied,
+    ));
+    operations[17] = NesCpu::encode((
+        Instructions::PullAccumulatorFromStack,
+        AddressingMode::Implied,
+    ));
+    operations[18] = NesCpu::encode((
+        Instructions::PullAccumulatorFromStack,
+        AddressingMode::Implied,
+    ));
+    operations[19] = NesCpu::encode((
+        Instructions::PullAccumulatorFromStack,
+        AddressingMode::Implied,
+    ));
+    return operations;
+}
