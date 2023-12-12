@@ -1,11 +1,12 @@
 use crate::memory::{Bus, Memory, ADDR_HI};
-use crate::{combine_bytes_to_u16, NesRom};
+use crate::NesRom;
+use std::fmt::{write, Display, Formatter};
 use std::io;
 use std::process::exit;
 
 pub const CLOCK_RATE: u32 = 21441960;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum AddressingMode {
     Accumulator,
     Absolute,
@@ -22,6 +23,7 @@ pub enum AddressingMode {
     ZeroPageY,
 }
 
+#[derive(Debug, Clone)]
 pub struct CurrentInstruction {
     op: Instructions,
     mode: AddressingMode,
@@ -32,6 +34,12 @@ impl CurrentInstruction {
             op: Instructions::JAM,
             mode: AddressingMode::Implied,
         }
+    }
+}
+
+impl Display for CurrentInstruction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}: {:?}", self.op, self.mode)
     }
 }
 
@@ -56,7 +64,8 @@ impl AddressingMode {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+// todo reduce length of some entries
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Instructions {
     SetInterruptDisable,
     ClearInterruptDisable,
@@ -123,7 +132,7 @@ pub enum Instructions {
     // ??
     ISC,
 
-    // illegal?
+    // illegal -- need to add nicer names
     SLO,
     SAX,
     DCP,
@@ -146,7 +155,7 @@ pub enum Instructions {
 }
 
 // https://www.nesdev.org/wiki/2A03
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Registers {
     pub pc: u16,
     sp: u8,
@@ -178,7 +187,7 @@ impl Registers {
 // break command
 // overflow flag
 // negative flag
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CPUFlags {
     carry: bool,
     zero: bool,
@@ -186,6 +195,10 @@ struct CPUFlags {
     decimal: bool, // nes unused?
     overflow: bool,
     negative: bool,
+}
+
+trait Processor {
+    fn decode_instruction(opcode: u8)
 }
 
 impl CPUFlags {
@@ -228,6 +241,7 @@ impl CPUFlags {
     }
 }
 
+#[derive(Clone)]
 pub struct NesCpu {
     pub memory: Memory,
     pub reg: Registers,
@@ -242,10 +256,12 @@ impl NesCpu {
             current: CurrentInstruction::new(),
         }
     }
+    /// Gets the next byte after the current instruction
     pub fn next_byte(&self) -> u8 {
         self.memory.read_byte(self.reg.pc + 1)
     }
 
+    /// Gets the next word after the current instruction
     pub fn next_word(&self) -> u16 {
         self.memory.read_word(self.reg.pc + 1)
     }
@@ -636,7 +652,16 @@ impl NesCpu {
         );
     }
 
+    fn push_stack_u16(&mut self, data: u16) {
+        let ra_bytes = (data).to_le_bytes();
+        self.push_stack(ra_bytes[0]);
+        self.push_stack(ra_bytes[1]);
+    }
+
     fn pop_stack(&mut self) -> u8 {
+        if self.reg.sp == 0xFF {
+            panic!("Stack pointer overflow!");
+        }
         let address: u16 = 0x100 + self.reg.sp as u16;
         self.reg.sp += 1;
         let res = self.memory.read_byte(address + 1);
@@ -645,6 +670,12 @@ impl NesCpu {
             res, self.reg.sp
         );
         res
+    }
+
+    fn pop_stack_u16(&mut self) -> u16 {
+        let low = self.pop_stack();
+        let hi = self.pop_stack();
+        u16::from_le_bytes([low, hi])
     }
 
     // togo
@@ -698,73 +729,163 @@ impl NesCpu {
         self.reg.pc += addressing_mode.get_increment();
     }
 
-    fn load_register(&mut self, addressing_mode: &AddressingMode, reg_name: &str) {
-        let address = match addressing_mode {
+    /// Move the processor program counter to the next instruction in memory.
+    fn next(&mut self) {
+        self.reg.pc += self.current.mode.get_increment();
+    }
+
+    /// Load a value into a register
+    fn load_register(&mut self) {
+        let address = match self.current.mode {
             AddressingMode::Absolute | AddressingMode::AbsoluteX | AddressingMode::AbsoluteY => {
-                self.memory.read_word(self.reg.pc + 1)
+                self.next_word()
             }
-            AddressingMode::ZeroPage => self.memory.read_byte(self.reg.pc + 1) as u16,
+            AddressingMode::ZeroPage => self.next_byte() as u16,
             _ => 0,
         };
 
-        let value = match addressing_mode {
-            AddressingMode::Immediate => self.memory.read_byte(self.reg.pc + 1),
+        let value = match self.current.mode {
+            AddressingMode::Immediate => self.next_byte(),
             AddressingMode::Absolute => self.memory.read_byte(address),
             AddressingMode::AbsoluteX => self.memory.read_byte(address + self.reg.idx as u16),
             AddressingMode::AbsoluteY => self.memory.read_byte(address + self.reg.idy as u16),
             AddressingMode::ZeroPage => self.memory.read_byte(address),
-            _ => panic!("Load Not implemented! {:?}", addressing_mode),
+            AddressingMode::ZeroPageX => self.memory.read_byte(address + self.reg.idx as u16),
+            AddressingMode::ZeroPageY => self.memory.read_byte(address + self.reg.idy as u16),
+            _ => panic!("Load Not implemented! {:?}", self.current.mode),
         };
 
-        match reg_name {
-            "A" => self.reg.accumulator = value,
-            "X" => self.reg.idx = value,
-            "Y" => self.reg.idy = value,
-            "SP" => self.reg.sp = value,
-            _ => panic!("Unknown register: {}", reg_name),
+        match self.current.op {
+            Instructions::LoadAccumulator => self.reg.accumulator = value,
+            Instructions::LoadX => self.reg.idx = value,
+            Instructions::LoadY => self.reg.idy = value,
+            _ => panic!(
+                "Unknown instruction for load_register: {:?}",
+                self.current.op
+            ),
         }
+
+        // TODO
         println!(
-            "Load {}: {1} (0x{1:X}) {2:?}",
-            reg_name, value, &addressing_mode
+            "{:?}: {1} (0x{1:X}) {2:?}",
+            self.current.op, value, &self.current.mode
         );
-        self.reg.pc += addressing_mode.get_increment();
+        self.next();
     }
 
-    fn store_register(&mut self, addressing_mode: &AddressingMode, register_name: &str) {
-        let address = match addressing_mode {
-            AddressingMode::Absolute => self.memory.read_word(self.reg.pc + 1),
-            AddressingMode::ZeroPage => self.memory.read_byte(self.reg.pc + 1) as u16,
-            AddressingMode::ZeroPageX => {
-                let zero_pg = self.memory.read_byte(self.reg.pc + 1);
-                (zero_pg + self.reg.idx) as u16
+    /// Store a register in memory
+    fn store_register(&mut self) {
+        let address = match self.current.mode {
+            AddressingMode::Absolute => self.next_word(),
+            AddressingMode::AbsoluteX => self.next_word().wrapping_add(self.reg.idx as u16),
+            AddressingMode::AbsoluteY => self.next_word().wrapping_add(self.reg.idy as u16),
+            AddressingMode::ZeroPage => self.next_byte() as u16,
+            AddressingMode::ZeroPageX => self.next_byte().wrapping_add(self.reg.idx) as u16,
+            AddressingMode::ZeroPageY => self.next_byte().wrapping_add(self.reg.idy) as u16,
+            AddressingMode::YIndirect => {
+                let zero_address = self.next_byte();
+                let address = self.memory.read_byte(zero_address as u16);
+                address.wrapping_add(self.reg.idy) as u16
             }
-            AddressingMode::ZeroPageY => {
-                let zero_pg = self.memory.read_byte(self.reg.pc + 1);
-                (zero_pg + self.reg.idy) as u16
-            }
-
-            _ => panic!("Store Not implemented! {:?}", addressing_mode),
+            _ => panic!("Store Not implemented! {:?}", self.current.mode),
         };
 
-        let register = match register_name {
-            "A" => self.reg.accumulator,
-            "X" => self.reg.idx,
-            "Y" => self.reg.idy,
-            "SP" => self.reg.sp,
-            _ => panic!("Unknown register: {}", register_name),
+        let register_value = match self.current.op {
+            Instructions::StoreAccumulator => self.reg.accumulator,
+            Instructions::StoreX => self.reg.idx,
+            Instructions::StoreY => self.reg.idy,
+            _ => panic!(
+                "Unknown instruction for store_register: {:?}",
+                self.current.op
+            ),
         };
 
-        self.memory.write_byte(address, register);
+        self.memory.write_byte(address, register_value);
         println!(
-            "Stored {0}: Val: {2} (0x{2:X}) 0x{1:X} PC: 0x{3:x}",
-            register_name, address, register, self.reg.pc
+            "{:?}: Val: {2} (0x{2:X}) 0x{1:X} PC: 0x{3:x}",
+            self.current.op, address, register_value, self.reg.pc
         );
-        self.reg.pc += addressing_mode.get_increment();
+
+        self.next();
+    }
+
+    /// Increase a register by one
+    fn increase_register(&mut self) {
+        let register = match self.current.op {
+            Instructions::IncrementX => &mut self.reg.idx,
+            Instructions::IncrementY => &mut self.reg.idy,
+            _ => panic!(
+                "Unknown instruction for increase_register: {:?}",
+                self.current.op
+            ),
+        };
+        *register = register.wrapping_add(1);
+        if *register == 0 {
+            self.reg.flags.zero = true;
+            self.reg.flags.overflow = true;
+        } else {
+            self.reg.flags.zero = false;
+        };
+
+        println!("{:?}: Val: {1} (0x{1:x})", self.current.op, register);
+        self.next();
+    }
+
+    // todo set zero bit if == 0, negative bit if negative.
+    /// Decrease a register by one
+    fn decrease_register(&mut self) {
+        let register = match self.current.op {
+            Instructions::DecrementX => &mut self.reg.idx,
+            Instructions::DecrementY => &mut self.reg.idy,
+            _ => panic!(
+                "Unknown instruction for decrease_register: {:?}",
+                self.current.op
+            ),
+        };
+
+        *register = register.wrapping_sub(1);
+        if *register == 0xFF {
+            self.reg.flags.zero = false;
+            self.reg.flags.negative = true;
+        } else if *register == 0 {
+            self.reg.flags.zero = true;
+        } else {
+            self.reg.flags.zero = false;
+        }
+
+        println!("{:?}: Val: {1} (0x{1:x})", self.current.op, register);
+        self.next();
+    }
+
+    // todo logging message
+    /// decrement mem
+    fn decrement_mem(&mut self) {
+        let address = match self.current.mode {
+            AddressingMode::Absolute => self.next_word(),
+            _ => panic!("Invalid mode for decrement_mem {:?}", self.current.mode),
+        };
+
+        let result = self.memory.read_byte(address).wrapping_sub(1);
+        self.memory.write_byte(address, result);
+        self.next();
+    }
+
+    // todo logging message
+    /// decrement mem
+    fn increment_mem(&mut self) {
+        let address = match self.current.mode {
+            AddressingMode::Absolute => self.next_word(),
+            _ => panic!("Invalid mode for decrement_mem {:?}", self.current.mode),
+        };
+
+        let result = self.memory.read_byte(address).wrapping_add(1);
+        self.memory.write_byte(address, result);
+        self.next();
     }
 
     fn shift_one_left(&mut self, addressing_mode: &AddressingMode) {
         let address = match addressing_mode {
-            AddressingMode::Absolute => self.memory.read_word(self.reg.pc + 1),
+            AddressingMode::Absolute => self.next_word(),
             _ => 0,
         };
 
@@ -779,102 +900,78 @@ impl NesCpu {
         self.reg.pc += addressing_mode.get_increment();
     }
 
-    fn increase_register(&mut self, addressing_mode: &AddressingMode, register_name: &str) {
-        let register = match register_name {
-            "A" => &mut self.reg.accumulator,
-            "X" => &mut self.reg.idx,
-            "Y" => &mut self.reg.idy,
-            "SP" => &mut self.reg.sp,
-            _ => panic!("Unknown register: {}", register_name),
-        };
-        *register = register.wrapping_add(1);
-        if *register == 0 {
-            self.reg.flags.zero = true;
-            self.reg.flags.overflow = true;
-        } else {
-            self.reg.flags.zero = false;
-        };
-        println!("Increased {0}: Val: {1} (0x{1:x})", register_name, register);
-        self.reg.pc += addressing_mode.get_increment();
-    }
+    pub fn execute(&mut self) {
+        // temporary -- TODO find a solution to this, shouldn't need to clone shit each instruction
+        let operation = (&self.current.op.clone(), &self.current.mode.clone());
 
-    // todo set zero bit if == 0, negative bit if negative.
-    fn decrease_register(&mut self, addressing_mode: &AddressingMode, register_name: &str) {
-        let register = match register_name {
-            "A" => &mut self.reg.accumulator,
-            "X" => &mut self.reg.idx,
-            "Y" => &mut self.reg.idy,
-            "SP" => &mut self.reg.sp,
-            _ => panic!("Unknown register: {}", register_name),
-        };
-        *register = register.wrapping_sub(1);
-        if *register == 0xFF {
-            self.reg.flags.zero = false;
-            self.reg.flags.negative = true;
-        } else if *register == 0 {
-            self.reg.flags.zero = true;
-        } else {
-            self.reg.flags.zero = false;
-        }
-        println!("Decreased {0}: Val: {1} (0x{1:x})", register_name, register);
-        self.reg.pc += addressing_mode.get_increment();
-    }
-
-    pub fn execute(&mut self, operation: (&Instructions, &AddressingMode)) {
         match operation {
-            (Instructions::Jump, AddressingMode::Absolute) => {
-                self.jump(self.memory.read_word(self.reg.pc + 1));
-            }
+            (Instructions::Jump, AddressingMode::Absolute) => self.jump(self.next_word()),
             (Instructions::Jump, AddressingMode::Indirect) => {
-                self.reg.pc += operation.1.get_increment();
-                println!("Indirect jump not implemented!");
+                let address = self.next_word();
+                self.jump(self.memory.read_word(address));
             }
 
+            // JSR
             (Instructions::JumpSubroutine, AddressingMode::Absolute) => {
-                let ra_bytes = (self.reg.pc + 3).to_le_bytes();
-                self.push_stack(ra_bytes[0]);
-                self.push_stack(ra_bytes[1]);
-                self.jump(self.memory.read_word(self.reg.pc + 1));
-                println!("Jump SUBROUTINE")
+                self.push_stack_u16(self.memory.read_word(self.reg.pc + 3));
+                self.jump(self.next_word());
+            }
+            (Instructions::ReturnFromSubroutine, AddressingMode::Implied) => {
+                let addr = self.pop_stack_u16();
+                self.jump(addr);
             }
 
-            (Instructions::ReturnFromSubroutine, AddressingMode::Implied) => {
-                let low = self.pop_stack();
-                let hi = self.pop_stack();
-                self.jump(u16::from_le_bytes([low, hi]));
-                println!("Return JUMP SUBROUTINE")
-            }
+            // conditional branching
+            (Instructions::BranchOnResultPlus, AddressingMode::Relative)
+            | (Instructions::BranchOnResultMinus, AddressingMode::Relative)
+            | (Instructions::BranchOnResultZero, AddressingMode::Relative)
+            | (Instructions::BranchOnResultNotZero, AddressingMode::Relative)
+            | (Instructions::BranchOnOverflowSet, AddressingMode::Relative)
+            | (Instructions::BranchOnOverflowClear, AddressingMode::Relative)
+            | (Instructions::BranchOnCarrySet, AddressingMode::Relative)
+            | (Instructions::BranchOnCarryClear, AddressingMode::Relative) => self.branch(),
 
             (Instructions::CompareAccumulator, AddressingMode::Immediate)
+            | (Instructions::CompareX, AddressingMode::Immediate)
+            | (Instructions::CompareY, AddressingMode::Immediate)
             | (Instructions::CompareAccumulator, AddressingMode::AbsoluteY) => {
-                self.compare_register(operation.1, "A");
-            }
-            (Instructions::CompareX, AddressingMode::Immediate) => {
-                self.compare_register(operation.1, "X");
-            }
-            (Instructions::CompareY, AddressingMode::Immediate) => {
-                self.compare_register(operation.1, "Y");
+                self.compare_register();
             }
 
-            (Instructions::SetInterruptDisable, AddressingMode::Implied) => {
-                self.set_interrupts_disabled(true);
-            }
-
-            (Instructions::ClearDecimalMode, AddressingMode::Implied) => {
-                self.set_decimal(false);
-            }
+            /* storing registers */
+            (Instructions::StoreAccumulator, AddressingMode::Absolute)
+            | (Instructions::StoreAccumulator, AddressingMode::AbsoluteX)
+            | (Instructions::StoreAccumulator, AddressingMode::AbsoluteY)
+            | (Instructions::StoreAccumulator, AddressingMode::ZeroPage)
+            | (Instructions::StoreAccumulator, AddressingMode::ZeroPageX)
+            | (Instructions::StoreAccumulator, AddressingMode::ZeroPageY)
+            | (Instructions::StoreAccumulator, AddressingMode::YIndirect)
+            | (Instructions::StoreX, AddressingMode::Absolute)
+            | (Instructions::StoreX, AddressingMode::ZeroPage)
+            | (Instructions::StoreX, AddressingMode::ZeroPageY)
+            | (Instructions::StoreY, AddressingMode::Absolute)
+            | (Instructions::StoreY, AddressingMode::ZeroPage)
+            | (Instructions::StoreY, AddressingMode::ZeroPageX) => self.store_register(),
 
             /* load registers */
             (Instructions::LoadAccumulator, AddressingMode::Immediate)
-            | (Instructions::LoadAccumulator, AddressingMode::ZeroPage)
             | (Instructions::LoadAccumulator, AddressingMode::Absolute)
-            | (Instructions::LoadAccumulator, AddressingMode::AbsoluteX) => {
-                self.load_register(operation.1, "A");
+            | (Instructions::LoadAccumulator, AddressingMode::AbsoluteX)
+            | (Instructions::LoadAccumulator, AddressingMode::ZeroPage)
+            | (Instructions::LoadAccumulator, AddressingMode::ZeroPageX)
+            | (Instructions::LoadAccumulator, AddressingMode::ZeroPageY)
+            | (Instructions::LoadX, AddressingMode::Immediate)
+            | (Instructions::LoadX, AddressingMode::ZeroPage)
+            | (Instructions::LoadX, AddressingMode::Absolute)
+            | (Instructions::LoadY, AddressingMode::Immediate)
+            | (Instructions::LoadY, AddressingMode::ZeroPage)
+            | (Instructions::LoadY, AddressingMode::Absolute) => {
+                self.load_register();
             }
 
             (Instructions::PushAccumulatorOnStack, AddressingMode::Implied) => {
                 self.push_stack(self.reg.accumulator);
-                self.reg.pc += operation.1.get_increment()
+                self.next();
             }
 
             (Instructions::PullAccumulatorFromStack, AddressingMode::Implied) => {
@@ -882,120 +979,57 @@ impl NesCpu {
                 self.reg.pc += operation.1.get_increment()
             }
 
-            (Instructions::LoadX, AddressingMode::Immediate)
-            | (Instructions::LoadX, AddressingMode::ZeroPage)
-            | (Instructions::LoadX, AddressingMode::Absolute) => {
-                self.load_register(operation.1, "X")
-            }
-
-            (Instructions::LoadY, AddressingMode::Immediate)
-            | (Instructions::LoadY, AddressingMode::ZeroPage)
-            | (Instructions::LoadY, AddressingMode::Absolute) => {
-                self.load_register(operation.1, "Y")
-            }
-
-            /* storing registers */
-            (Instructions::StoreAccumulator, AddressingMode::Absolute)
-            | (Instructions::StoreAccumulator, AddressingMode::ZeroPage)
-            | (Instructions::StoreAccumulator, AddressingMode::ZeroPageX)
-            | (Instructions::StoreAccumulator, AddressingMode::ZeroPageY) => {
-                self.store_register(operation.1, "A")
-            }
-
-            (Instructions::StoreX, AddressingMode::Absolute)
-            | (Instructions::StoreX, AddressingMode::ZeroPage)
-            | (Instructions::StoreX, AddressingMode::ZeroPageY) => {
-                self.store_register(operation.1, "X")
-            }
-
-            (Instructions::StoreY, AddressingMode::Absolute)
-            | (Instructions::StoreY, AddressingMode::ZeroPage)
-            | (Instructions::StoreY, AddressingMode::ZeroPageX) => {
-                self.store_register(operation.1, "Y")
-            }
-
             (Instructions::ShiftOneLeft, AddressingMode::Absolute) => {
                 self.shift_one_left(operation.1)
             }
 
             // increment/decrement registers
-            (Instructions::IncrementX, AddressingMode::Implied) => {
-                self.increase_register(operation.1, "X")
-            }
-            (Instructions::IncrementY, AddressingMode::Implied) => {
-                self.increase_register(operation.1, "Y")
-            }
+            (Instructions::IncrementX, AddressingMode::Implied)
+            | (Instructions::IncrementY, AddressingMode::Implied) => self.increase_register(),
+            (Instructions::DecrementX, AddressingMode::Implied)
+            | (Instructions::DecrementY, AddressingMode::Implied) => self.decrease_register(),
 
-            (Instructions::DecrementX, AddressingMode::Implied) => {
-                self.decrease_register(operation.1, "X")
-            }
-            (Instructions::DecrementY, AddressingMode::Implied) => {
-                self.decrease_register(operation.1, "Y")
-            }
+            // increase/decrement memory
+            (Instructions::IncrementMem, AddressingMode::Absolute) => self.increment_mem(),
+            (Instructions::DecrementMem, AddressingMode::Absolute) => self.decrement_mem(),
+
+            // TODO
             (Instructions::SetDecimalMode, AddressingMode::Implied) => self.set_decimal(true),
             (Instructions::ClearCarry, AddressingMode::Implied) => self.set_carry(false),
             (Instructions::SetCarry, AddressingMode::Implied) => self.set_carry(true),
             (Instructions::ClearOverflow, AddressingMode::Implied) => self.set_overflow(false),
+            (Instructions::SetInterruptDisable, AddressingMode::Implied) => {
+                self.set_interrupts_disabled(true);
+            }
+            (Instructions::ClearDecimalMode, AddressingMode::Implied) => {
+                self.set_decimal(false);
+            }
 
             (Instructions::TestBitsAccumulator, AddressingMode::ZeroPage) => {
                 self.test_bit(operation.1);
             }
 
-            (Instructions::BranchOnCarrySet, AddressingMode::Relative) => {
-                self.branch(operation.1, self.reg.flags.carry)
-            }
-            (Instructions::BranchOnCarryClear, AddressingMode::Relative) => {
-                self.branch(operation.1, !self.reg.flags.carry)
-            }
-
-            (Instructions::BranchOnResultZero, AddressingMode::Relative) => {
-                self.branch(operation.1, self.reg.flags.zero)
-            }
-            (Instructions::BranchOnResultNotZero, AddressingMode::Relative) => {
-                self.branch(operation.1, !self.reg.flags.zero)
+            /* bitwise */
+            (Instructions::ORAccumulator, AddressingMode::XIndirect)
+            | (Instructions::ORAccumulator, AddressingMode::YIndirect) => {
+                self.or_accumulator();
             }
 
-            (Instructions::BranchOnResultPlus, AddressingMode::Relative) => {
-                self.branch(operation.1, !self.reg.flags.negative)
-            }
-
-            (Instructions::BranchOnResultMinus, AddressingMode::Relative) => {
-                self.branch(operation.1, self.reg.flags.negative)
-            }
-
-            (Instructions::BranchOnOverflowSet, AddressingMode::Relative) => {
-                self.branch(operation.1, self.reg.flags.overflow)
-            }
-
-            (Instructions::BranchOnOverflowClear, AddressingMode::Relative) => {
-                self.branch(operation.1, !self.reg.flags.overflow)
+            (Instructions::MoveXToStackPointer, AddressingMode::Implied) => {
+                self.reg.sp = self.reg.idx;
+                println!("Stored X in SP: 0x{:x}", self.reg.sp);
+                self.next();
             }
 
             (Instructions::AddMemToAccumulatorWithCarry, AddressingMode::AbsoluteX) => {
                 self.add_mem_to_accumulator_with_carry_absolute_x()
             }
 
-            /* bitwise */
-            (Instructions::ORAccumulator, AddressingMode::XIndirect) => {
-                let base_address =
-                    self.memory.read_byte(self.reg.pc + 1) as u16 + self.reg.idx as u16;
-                let operand = self.memory.read_byte(base_address);
-                self.reg.accumulator |= operand;
-                self.reg.pc += operation.1.get_increment();
-                println!("ORAccumulator XIndirect: 0x{:x}", self.reg.sp); //tmp
-            }
-
-            (Instructions::MoveXToStackPointer, AddressingMode::Implied) => {
-                self.reg.sp = self.reg.idx;
-                println!("Stored X in SP: 0x{:x}", self.reg.sp);
-                self.reg.pc += operation.1.get_increment();
-            }
-
             (Instructions::RotateOneLeft, AddressingMode::Absolute) => {
-                let address = self.memory.read_word(self.reg.pc + 1);
+                let address = self.next_word();
                 let value = self.memory.read_byte(address);
                 self.memory.write_byte(address, value.rotate_left(1));
-                self.reg.pc += operation.1.get_increment();
+                self.next();
             }
 
             (Instructions::ISC, AddressingMode::Absolute) => self.isc_abs(),
@@ -1023,27 +1057,63 @@ impl NesCpu {
             (Instructions::TransferAccumulatorToY, AddressingMode::Implied) => {
                 self.reg.idy = self.reg.accumulator;
                 println!("Transfered A -> Y {}", self.reg.idy);
-                self.reg.pc += operation.1.get_increment();
+                self.next();
             }
 
             // todo
             (Instructions::TransferAccumulatorToX, AddressingMode::Implied) => {
                 self.reg.idx = self.reg.accumulator;
                 println!("Transfered A -> X {}", self.reg.idx);
-                self.reg.pc += operation.1.get_increment();
+                self.next();
             }
 
-            (Instructions::MissingOperation, AddressingMode::Implied) => {
-                panic!("Missing operation??")
+            // todo
+            (Instructions::SubtractAccumulatorWithBorrow, AddressingMode::Immediate) => {
+                let operand = self.next_byte();
+                // Perform Subtract Immediate with Carry
+                let borrow = if self.reg.flags.carry { 1 } else { 0 };
+                let result = self
+                    .reg
+                    .accumulator
+                    .wrapping_sub(operand)
+                    .wrapping_sub(borrow);
+
+                // Update CPU state
+                self.reg.accumulator = result;
+                self.reg.flags.carry = result <= self.reg.accumulator; // Set carry flag if no borrow
+                                                                       // ... other flag updates and state modifications
+            }
+            // todo
+            (Instructions::SubtractAccumulatorWithBorrow, AddressingMode::YIndirect) => {
+                // Subtract Immediate with Carry, Y-Indirect
+                let y_register = self.reg.idy; // Assuming you have a Y register in your CPU state
+                let indirect_address = self.next_byte().wrapping_add(y_register) as u16;
+                let operand_value = self.memory.read_byte(indirect_address);
+
+                let borrow = if self.reg.flags.carry { 1 } else { 0 };
+                let result = self
+                    .reg
+                    .accumulator
+                    .wrapping_sub(operand_value)
+                    .wrapping_sub(borrow);
+
+                // Update CPU state
+                self.reg.accumulator = result;
+                self.reg.flags.carry = result <= self.reg.accumulator; // Set carry flag if no borrow
+                                                                       // ... other flag updates and state modifications
+                self.next();
             }
 
             (Instructions::EORAccumulator, AddressingMode::XIndirect) => {
                 self.eor_accumulator_xindirect();
             }
 
+            (Instructions::MissingOperation, AddressingMode::Implied) => {
+                panic!("Missing operation??")
+            }
             (Instructions::NoOperation, _) => {
-                println!("NOOP!");
-                self.reg.pc += operation.1.get_increment()
+                println!("NO OP");
+                self.next();
             }
 
             (Instructions::ForceBreak, AddressingMode::Implied) => self.breakpoint(),
@@ -1068,6 +1138,25 @@ impl NesCpu {
                 self.reg.pc += operation.1.get_increment();
             }
         }
+    }
+
+    fn or_accumulator(&mut self) {
+        let address = match self.current.mode {
+            AddressingMode::Immediate => 0, // unused for immediate
+            AddressingMode::XIndirect => self.next_byte() as u16 + self.reg.idx as u16,
+            AddressingMode::YIndirect => self.next_byte() as u16 + self.reg.idy as u16,
+            _ => panic!("Invalid mode for or_accumulator {:?}", self.current.mode),
+        };
+        let operand = match self.current.mode {
+            AddressingMode::Immediate => self.next_byte(),
+            AddressingMode::XIndirect | AddressingMode::YIndirect => self.memory.read_byte(address),
+            _ => panic!(
+                "Invalid mode for or_accumulator operand {:?}",
+                self.current.mode
+            ),
+        };
+        self.next();
+        println!("ORAccumulator XIndirect: 0x{:x}", address); //tmp // TODO
     }
 
     fn eor_accumulator_xindirect(&mut self) {
@@ -1120,17 +1209,20 @@ impl NesCpu {
 
     pub fn fetch_decode_next(&mut self) {
         if self.reg.pc >= ADDR_HI {
-            eprintln!();
             panic!("PC counter too high! {}", self.reg.pc)
         }
         let next_instruction = self.memory.read_byte(self.reg.pc);
         let (instruction, addressing_mode) = Self::decode(next_instruction);
-        dbg!(&instruction, &addressing_mode);
+        self.current = CurrentInstruction {
+            op: instruction,
+            mode: addressing_mode,
+        };
+        println!("0x{:X}: {}", self.reg.pc, self.current);
         // increment pc for each instruction based on instruction type
 
         // dbg!(&instruction);
 
-        self.execute((&instruction, &addressing_mode));
+        self.execute();
     }
 
     // TODO - works with mapper 0 only
@@ -1148,49 +1240,49 @@ impl NesCpu {
 
     pub fn load_bytes(&mut self, data: &[u8]) {
         self.memory.write_bytes(0x8000, data);
-
         self.set_pc(0x8000);
         // self.set_pc(0xC000);
     }
 
     // 0x00
+    // TODO need to push address onto stack and set block bit
     fn breakpoint(&mut self) {
-        // Create a new instance of stdin
-        let stdin = io::stdin();
         // add PC
         println!("BREAKPOINT: 0x{:X}", self.reg.pc);
 
         // Buffer to hold the input
         let mut input = String::new();
 
-        // Wait for user input
-        stdin.read_line(&mut input).expect("Failed to read line");
-        self.reg.pc += 1;
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line!");
+        self.next();
     }
 
-    fn compare_register(&mut self, addressing_mode: &AddressingMode, register_name: &str) {
-        let value = match addressing_mode {
-            AddressingMode::Immediate => self.memory.read_byte(self.reg.pc + 1),
+    fn compare_register(&mut self) {
+        let value = match self.current.mode {
+            AddressingMode::Immediate => self.next_byte(),
             AddressingMode::AbsoluteY => {
-                let address = self.memory.read_word(self.reg.pc + 1);
-                self.memory.read_byte(address + self.reg.idy as u16)
+                let address = self.next_word();
+                self.memory
+                    .read_byte(address.wrapping_add(self.reg.idy as u16))
             }
             _ => {
                 panic!(
                     "Unimplemented! Compare register {:?} {:?}",
-                    register_name, addressing_mode
+                    self.current.op, self.current.mode
                 )
             }
         };
 
-        let result = match register_name {
-            "A" => self.reg.accumulator.wrapping_sub(value),
-            "X" => self.reg.idx.wrapping_sub(value),
-            "Y" => self.reg.idy.wrapping_sub(value),
+        let result = match self.current.op {
+            Instructions::CompareAccumulator => self.reg.accumulator.wrapping_sub(value),
+            Instructions::CompareX => self.reg.idx.wrapping_sub(value),
+            Instructions::CompareY => self.reg.idy.wrapping_sub(value),
             _ => {
                 panic!(
-                    "Unimplemented! Compare register {:?} {:?}",
-                    register_name, addressing_mode
+                    "Invalid op code for compare_register {:?} {:?}",
+                    self.current.op, self.current.mode
                 )
             }
         };
@@ -1200,21 +1292,33 @@ impl NesCpu {
         // self.reg.flags.negative = (result & 0x80) != 0;
         self.reg.flags.carry = self.reg.accumulator >= value;
 
-        self.reg.pc += addressing_mode.get_increment();
+        self.reg.pc += self.current.mode.get_increment();
     }
 
-    fn branch(&mut self, addressing_mode: &AddressingMode, condition: bool) {
+    fn branch(&mut self) {
+        let condition = match self.current.op {
+            Instructions::BranchOnResultMinus => self.reg.flags.negative,
+            Instructions::BranchOnResultZero => self.reg.flags.zero,
+            Instructions::BranchOnResultNotZero => !self.reg.flags.zero,
+            Instructions::BranchOnResultPlus => !self.reg.flags.negative,
+            Instructions::BranchOnOverflowSet => self.reg.flags.overflow,
+            Instructions::BranchOnOverflowClear => !self.reg.flags.overflow,
+            Instructions::BranchOnCarrySet => self.reg.flags.carry,
+            Instructions::BranchOnCarryClear => !self.reg.flags.carry,
+            _ => panic!("Invalid instruction for branch: {:?}", self.current.op),
+        };
+
         if condition {
-            self.reg.pc = match addressing_mode {
+            self.reg.pc = match self.current.mode {
                 AddressingMode::Relative => {
-                    let value = self.memory.read_byte(self.reg.pc + 1);
+                    let value = self.next_byte();
                     self.reg.pc + value as u16
                 }
-                _ => panic!("Unimplemented! Branch: {:?}", addressing_mode),
+                _ => panic!("Unimplemented! Branch: {:?}", self.current.mode),
             };
             println!("Branching to addr: 0x{:x}", self.reg.pc);
         } else {
-            self.reg.pc += addressing_mode.get_increment();
+            self.next();
         }
         dbg!(&self.reg.flags);
     }
@@ -1222,7 +1326,7 @@ impl NesCpu {
     // jump to address
     fn jump(&mut self, address: u16) {
         self.set_pc(address);
-        println!("Jumped! {:x}", self.reg.pc);
+        println!("Jumped! {:?} {:x}", self.current.op, self.reg.pc);
     }
 }
 

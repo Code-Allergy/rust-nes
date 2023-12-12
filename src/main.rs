@@ -1,5 +1,6 @@
 extern crate sdl2;
 
+use lazy_static::lazy_static;
 use nesemu::cpu::{AddressingMode, Instructions, NesCpu, CLOCK_RATE};
 use nesemu::parse_bin_file;
 use sdl2::event::Event;
@@ -7,22 +8,30 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use std::fs::File;
 use std::io::Read;
+use std::sync::{Mutex, MutexGuard};
 use std::thread::sleep;
 use std::time::Duration;
-use std::{fs, io};
+use std::{fs, io, panic};
+
 const SIM_CLOCK_RATE: i32 = 50;
+
+lazy_static! {
+    static ref PROCESSOR: Mutex<NesCpu> = Mutex::new(NesCpu::new());
+}
 
 pub fn main() {
     // let rom = parse_bin_file("test-bin/branch_timing_tests/Branch_Basics.nes")
     //     .expect("TODO: panic message");
-    // let rom = parse_bin_file("test-bin/genuine/SMB1.nes").expect("Fart brains");
+    let rom = parse_bin_file("test-bin/genuine/SMB1.nes").expect("Fart brains");
     let rom = parse_bin_file("test-bin/nestest.nes").expect("Fart brains");
-    let mut cpu = NesCpu::new();
-    cpu.load_rom(&rom);
+
+    let mut processor: MutexGuard<NesCpu> = PROCESSOR.lock().unwrap();
+
+    processor.load_rom(&rom);
     // cpu.load_bytes(&test_branch());
     // cpu.memory.dump_to_file("Memout.bin").expect("FUCK");
     loop {
-        cpu.fetch_decode_next();
+        processor.fetch_decode_next();
         sleep(Duration::from_secs_f64(1.0 / SIM_CLOCK_RATE as f64));
     }
 
