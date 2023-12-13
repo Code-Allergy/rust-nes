@@ -16,7 +16,7 @@ pub trait Bus {
     fn read_word(&self, address: u16) -> u16;
     fn write_bytes(&mut self, address: u16, bytes: &[u8]) {
         bytes.iter().enumerate().for_each(|(offset, &byte)| {
-            self.write_byte((address + offset as u16), byte);
+            self.write_byte(address + offset as u16, byte);
         });
     }
 }

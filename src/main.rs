@@ -1,7 +1,8 @@
 extern crate sdl2;
 
 use lazy_static::lazy_static;
-use nesemu::cpu::{AddressingMode, Instructions, NesCpu, CLOCK_RATE};
+use nesemu::cpu::{NesCpu, Processor, CLOCK_RATE};
+use nesemu::instructions::{AddressingMode, Instructions};
 use nesemu::parse_bin_file;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -13,7 +14,7 @@ use std::thread::sleep;
 use std::time::Duration;
 use std::{fs, io, panic};
 
-const SIM_CLOCK_RATE: i32 = 50;
+const SIM_CLOCK_RATE: i32 = 1000;
 
 lazy_static! {
     static ref PROCESSOR: Mutex<NesCpu> = Mutex::new(NesCpu::new());
@@ -22,13 +23,15 @@ lazy_static! {
 pub fn main() {
     // let rom = parse_bin_file("test-bin/branch_timing_tests/Branch_Basics.nes")
     //     .expect("TODO: panic message");
-    let rom = parse_bin_file("test-bin/genuine/SMB1.nes").expect("Fart brains");
+    // let rom = parse_bin_file("test-bin/genuine/SMB1.nes").expect("Fart brains");
     let rom = parse_bin_file("test-bin/nestest.nes").expect("Fart brains");
 
     let mut processor: MutexGuard<NesCpu> = PROCESSOR.lock().unwrap();
-
     processor.load_rom(&rom);
-    // cpu.load_bytes(&test_branch());
+    // let mut file = File::open("test-bin/non-nes/6502_functional_test.bin").unwrap();
+    // let mut program = [0u8; 32768];
+    // file.read_exact(&mut program).unwrap();
+    // processor.load_bytes(&program);
     // cpu.memory.dump_to_file("Memout.bin").expect("FUCK");
     loop {
         processor.fetch_decode_next();
@@ -80,56 +83,61 @@ pub fn sdl_display() {
 
 fn test_branch() -> [u8; 32] {
     let mut operations = [0u8; 32];
-    operations[0] = NesCpu::encode((Instructions::LoadAccumulator, AddressingMode::Immediate));
+    operations[0] =
+        NesCpu::encode_instructions(Instructions::LoadAccumulator, AddressingMode::Immediate);
     operations[1] = 128;
 
-    operations[2] = NesCpu::encode((
+    operations[2] = NesCpu::encode_instructions(
         Instructions::PushAccumulatorOnStack,
         AddressingMode::Implied,
-    ));
-    operations[3] = NesCpu::encode((Instructions::LoadAccumulator, AddressingMode::Immediate));
+    );
+    operations[3] =
+        NesCpu::encode_instructions(Instructions::LoadAccumulator, AddressingMode::Immediate);
     operations[4] = 4;
-    operations[5] = NesCpu::encode((
+    operations[5] = NesCpu::encode_instructions(
         Instructions::PushAccumulatorOnStack,
         AddressingMode::Implied,
-    ));
-    operations[6] = NesCpu::encode((Instructions::LoadAccumulator, AddressingMode::Immediate));
+    );
+    operations[6] =
+        NesCpu::encode_instructions(Instructions::LoadAccumulator, AddressingMode::Immediate);
     operations[7] = 3;
-    operations[8] = NesCpu::encode((
+    operations[8] = NesCpu::encode_instructions(
         Instructions::PushAccumulatorOnStack,
         AddressingMode::Implied,
-    ));
-    operations[9] = NesCpu::encode((Instructions::LoadAccumulator, AddressingMode::Immediate));
+    );
+    operations[9] =
+        NesCpu::encode_instructions(Instructions::LoadAccumulator, AddressingMode::Immediate);
     operations[10] = 2;
-    operations[11] = NesCpu::encode((
+    operations[11] = NesCpu::encode_instructions(
         Instructions::PushAccumulatorOnStack,
         AddressingMode::Implied,
-    ));
-    operations[12] = NesCpu::encode((Instructions::LoadAccumulator, AddressingMode::Immediate));
+    );
+    operations[12] =
+        NesCpu::encode_instructions(Instructions::LoadAccumulator, AddressingMode::Immediate);
     operations[13] = 1;
-    operations[14] = NesCpu::encode((
+    operations[14] = NesCpu::encode_instructions(
         Instructions::PushAccumulatorOnStack,
         AddressingMode::Implied,
-    ));
-    operations[15] = NesCpu::encode((
+    );
+    operations[15] = NesCpu::encode_instructions(
         Instructions::PullAccumulatorFromStack,
         AddressingMode::Implied,
-    ));
-    operations[16] = NesCpu::encode((
+    );
+    operations[16] = NesCpu::encode_instructions(
         Instructions::PullAccumulatorFromStack,
         AddressingMode::Implied,
-    ));
-    operations[17] = NesCpu::encode((
+    );
+    operations[17] = NesCpu::encode_instructions(
         Instructions::PullAccumulatorFromStack,
         AddressingMode::Implied,
-    ));
-    operations[18] = NesCpu::encode((
+    );
+    operations[18] = NesCpu::encode_instructions(
         Instructions::PullAccumulatorFromStack,
         AddressingMode::Implied,
-    ));
-    operations[19] = NesCpu::encode((
+    );
+    operations[19] = NesCpu::encode_instructions(
         Instructions::PullAccumulatorFromStack,
         AddressingMode::Implied,
-    ));
+    );
     return operations;
 }
