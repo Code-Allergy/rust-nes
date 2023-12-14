@@ -1,7 +1,5 @@
 use crate::cpu::{NesCpu, Processor};
-use crate::memory::Bus;
 use std::fmt::{Display, Formatter};
-use std::process::exit;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum AddressingMode {
@@ -495,8 +493,6 @@ impl Processor for NesCpu {
 
             // software breakpoint
             0x00 => (Instructions::ForceBreak, AddressingMode::Implied),
-
-            _ => (Instructions::MissingOperation, AddressingMode::Implied),
         }
     }
 
@@ -670,7 +666,6 @@ impl Processor for NesCpu {
             (Instructions::ISC, AddressingMode::ZeroPageX) => 0xF7,
             (Instructions::RLA, AddressingMode::ZeroPage) => 0x27,
             (Instructions::RLA, AddressingMode::XIndirect) => 0x23,
-            (Instructions::RLA, AddressingMode::ZeroPage) => 0x37,
             (Instructions::RLA, AddressingMode::Absolute) => 0x2F,
             (Instructions::RLA, AddressingMode::AbsoluteY) => 0x3B,
             (Instructions::RLA, AddressingMode::YIndirect) => 0x33,
@@ -713,7 +708,6 @@ impl Processor for NesCpu {
             (Instructions::SHA, AddressingMode::AbsoluteY) => 0x9F,
             (Instructions::SHA, AddressingMode::YIndirect) => 0x93,
             (Instructions::ANC, AddressingMode::Immediate) => 0x2B, // effectively the same as 0x0B
-            (Instructions::ANC, AddressingMode::Immediate) => 0x0B,
             (Instructions::ANE, AddressingMode::Immediate) => 0x8B,
             (Instructions::SAX, AddressingMode::ZeroPage) => 0x87,
             (Instructions::TAS, AddressingMode::AbsoluteY) => 0x9B,

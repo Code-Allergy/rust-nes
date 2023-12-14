@@ -1,15 +1,6 @@
-#![feature(file_create_new)]
-
 use std::fs::File;
 use std::io::Read;
 use std::{fs, io};
-//Result<Vec<u8>, io::Error>
-
-// fn get_bin_file(filename: &str) -> () {
-//     let mut f = File::open(filename)?;
-//     let metadata = fs::metadata(filename)?;
-//     dbg!(metadata);
-// }
 
 pub mod cpu;
 pub mod instructions;
@@ -59,7 +50,7 @@ pub fn parse_bin_file(filename: &str) -> io::Result<NesRom> {
     let mut f = File::open(filename).unwrap();
     let metadata = fs::metadata(filename).unwrap();
     let mut header = [0u8; 16];
-    if (metadata.len() > 16) {
+    if metadata.len() > 16 {
         f.read_exact(&mut header)?;
         if !header.starts_with(&[78, 69, 83, 26]) {
             return Err(io::Error::new(

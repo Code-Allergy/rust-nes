@@ -1,7 +1,6 @@
 use crate::instructions::{AddressingMode, CurrentInstruction, Instructions};
-use crate::memory::{Bus, Memory, ADDR_HI};
+use crate::memory::{Bus, Memory};
 use crate::NesRom;
-use std::fmt::{write, Display, Formatter};
 use std::io;
 use std::process::exit;
 
@@ -670,7 +669,10 @@ impl NesCpu {
                 self.load_register();
             }
 
-            (Instructions::RotateOneLeft, AddressingMode::ZeroPage)
+            // broken
+            (Instructions::RotateOneRight, AddressingMode::Accumulator)
+            | (Instructions::RotateOneLeft, AddressingMode::Accumulator)
+            | (Instructions::RotateOneLeft, AddressingMode::ZeroPage)
             | (Instructions::RotateOneLeft, AddressingMode::Absolute)
             | (Instructions::RotateOneLeft, AddressingMode::AbsoluteX)
             | (Instructions::RotateOneLeft, AddressingMode::AbsoluteY)
@@ -758,27 +760,6 @@ impl NesCpu {
             (Instructions::MoveXToStackPointer, AddressingMode::Implied) => {
                 self.reg.sp = self.reg.idx;
                 println!("Stored X in SP: 0x{:x}", self.reg.sp);
-                self.next();
-            }
-
-            (Instructions::RotateOneLeft, AddressingMode::Absolute) => {
-                let address = self.next_word();
-                let value = self.memory.read_byte(address);
-                self.memory.write_byte(address, value.rotate_left(1));
-                self.next();
-            }
-            // TODO clean up
-            (Instructions::RotateOneLeft, AddressingMode::Accumulator) => {
-                self.reg.accumulator = self.reg.accumulator.rotate_left(1);
-                self.reg.flags.zero = self.reg.accumulator == 0;
-                self.reg.flags.negative = self.reg.accumulator & 0x80 == 0x80;
-
-                self.next();
-            }
-            (Instructions::RotateOneRight, AddressingMode::Accumulator) => {
-                self.reg.accumulator = self.reg.accumulator.rotate_right(1);
-                self.reg.flags.zero = self.reg.accumulator == 0;
-                self.reg.flags.negative = self.reg.accumulator & 0x80 == 0x80;
                 self.next();
             }
 
@@ -1054,27 +1035,23 @@ impl NesCpu {
         dbg!(self.reg.flags.carry);
         dbg!(self.reg.accumulator, operand);
         let borrow = if self.reg.flags.carry { 1 } else { 0 };
-        let mut result = self
+        let result = self
             .reg
             .accumulator
             .wrapping_sub(operand)
             .wrapping_sub(borrow);
 
         let reg_before = self.reg.accumulator;
-        // let borrow_b = (u16::from(self.reg.accumulator) - u16::from(operand) - u16::from(borrow)) & 0x100
-        //         != 0;
-        // let result = self
-        //     .reg
-        //     .accumulator
-        //     .wrapping_sub(operand)
-        //     .wrapping_sub(borrow);
 
         // Update CPU state
         self.reg.accumulator = result;
         self.reg.flags.carry = result as i8 > 0 || borrow == 0;
         self.reg.flags.zero = result == 0;
         self.reg.flags.negative = result & 0x80 == 0x80;
-        println!("{:b} {:b} {:b}", self.reg.accumulator, result, operand);
+        println!(
+            "SBA: BROKEN {:b} {:b} {:b}",
+            self.reg.accumulator, result, operand
+        );
         let over = (borrow == 0 && operand > 127) && reg_before < 128 && self.reg.accumulator > 127;
         let under = (reg_before > 127)
             && (0u8.wrapping_sub(operand).wrapping_sub(borrow) > 127)
