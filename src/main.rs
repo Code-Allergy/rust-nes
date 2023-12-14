@@ -21,10 +21,10 @@ lazy_static! {
 }
 
 pub fn main() {
-    // let rom = parse_bin_file("test-bin/branch_timing_tests/Branch_Basics.nes")
-    //     .expect("TODO: panic message");
+    let rom = parse_bin_file("test-bin/branch_timing_tests/Branch_Basics.nes")
+        .expect("TODO: panic message");
     // let rom = parse_bin_file("test-bin/genuine/SMB1.nes").expect("Fart brains");
-    let rom = parse_bin_file("test-bin/nestest.nes").expect("Fart brains");
+    // let rom = parse_bin_file("test-bin/nestest.nes").expect("Fart brains");
 
     let mut processor: MutexGuard<NesCpu> = PROCESSOR.lock().unwrap();
     processor.load_rom(&rom);
@@ -41,6 +41,22 @@ pub fn main() {
     // cpu.memory.dump_to_file("some.bin").expect("Failed to write some");
     // dbg!(rom);
     // sdl_display();
+}
+fn test_cause() {
+    let mut cpu = NesCpu::new_from_bytes(&[
+        NesCpu::encode_instructions(
+            Instructions::TransferXToAccumulator,
+            AddressingMode::Implied,
+        ),
+        0,
+    ]);
+    cpu.reg.idx = 0xFA;
+    println!("Hello!");
+    cpu.reg.accumulator = 0;
+    println!("Hello!");
+    cpu.fetch_decode_next();
+    println!("HELLO");
+    assert_eq!(cpu.reg.accumulator, 0xFA);
 }
 
 pub fn sdl_display() {

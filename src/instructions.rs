@@ -568,7 +568,7 @@ impl Processor for NesCpu {
             (Instructions::StoreAccumulator, AddressingMode::AbsoluteY) => 0x99,
             (Instructions::ORAccumulator, AddressingMode::Absolute) => 0x0D,
             (Instructions::CompareY, AddressingMode::Immediate) => 0xC0,
-            (Instructions::TransferXToAccumulator, AddressingMode::Immediate) => 0x8A,
+            (Instructions::TransferXToAccumulator, AddressingMode::Implied) => 0x8A,
             (Instructions::BranchOnResultMinus, AddressingMode::Relative) => 0x30,
             (Instructions::LoadAccumulator, AddressingMode::ZeroPage) => 0xA5,
             (Instructions::ShiftOneLeft, AddressingMode::Accumulator) => 0x0A,
