@@ -371,6 +371,8 @@ impl NesCpu {
             AddressingMode::YIndirect => self.get_indirect_y(),
             _ => panic!("Store Not implemented! {:?}", self.current.mode),
         };
+        dbg!(address);
+        dbg!(self.reg.idy);
 
         let register_value = match self.current.op {
             Instructions::StoreAccumulator => self.reg.accumulator,
@@ -1649,21 +1651,194 @@ mod tests {
     mod storing_registers {
         use super::*;
         mod sta {
+            use super::*;
             #[test]
-            fn sta() {
-                todo!();
+            fn sta_zero_page() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(
+                        Instructions::StoreAccumulator,
+                        AddressingMode::ZeroPage,
+                    ),
+                    0x10,
+                ]);
+                cpu.reg.accumulator = 0x42;
+                cpu.memory.write_byte(0x10, 0);
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x10), 0x42);
+            }
+
+            #[test]
+            fn sta_zero_page_x() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(
+                        Instructions::StoreAccumulator,
+                        AddressingMode::ZeroPageX,
+                    ),
+                    0x10,
+                ]);
+                cpu.reg.accumulator = 0x42;
+                cpu.reg.idx = 0x5;
+                cpu.memory.write_byte(0x15, 0);
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x15), 0x42);
+            }
+
+            #[test]
+            fn sta_absolute() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(
+                        Instructions::StoreAccumulator,
+                        AddressingMode::Absolute,
+                    ),
+                    0x34,
+                    0x12,
+                ]);
+                cpu.reg.accumulator = 0x42;
+                cpu.memory.write_byte(0x1234, 0);
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x1234), 0x42);
+            }
+            #[test]
+            fn sta_absolute_x() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(
+                        Instructions::StoreAccumulator,
+                        AddressingMode::AbsoluteX,
+                    ),
+                    0x34,
+                    0x12,
+                ]);
+                cpu.reg.accumulator = 0x42;
+                cpu.reg.idx = 0x4;
+                cpu.memory.write_byte(0x1238, 0);
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x1238), 0x42);
+            }
+
+            #[test]
+            fn sta_absolute_y() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(
+                        Instructions::StoreAccumulator,
+                        AddressingMode::AbsoluteY,
+                    ),
+                    0x34,
+                    0x12,
+                ]);
+                cpu.reg.accumulator = 0x42;
+                cpu.reg.idy = 0x4;
+                cpu.memory.write_byte(0x1238, 0);
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x1238), 0x42);
+            }
+
+            #[test]
+            fn sta_indirect_x() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(
+                        Instructions::StoreAccumulator,
+                        AddressingMode::XIndirect,
+                    ),
+                    0x30,
+                ]);
+                cpu.reg.accumulator = 0x42;
+                cpu.reg.idx = 0x4;
+                cpu.memory.write_byte(0x34, 0x00);
+                cpu.memory.write_byte(0x35, 0x10);
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x1000), 0x42);
+            }
+
+            #[test]
+            fn sta_indirect_y() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(
+                        Instructions::StoreAccumulator,
+                        AddressingMode::YIndirect,
+                    ),
+                    0x30,
+                ]);
+                cpu.reg.accumulator = 0x42;
+                cpu.reg.idy = 0x4;
+                cpu.memory.write_byte(0x34, 0x00);
+                cpu.memory.write_byte(0x35, 0x10);
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x1000), 0x42);
             }
         }
+
         mod stx {
+            use super::*;
             #[test]
-            fn stx() {
-                todo!();
+            fn stx_zero_page() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(Instructions::StoreX, AddressingMode::ZeroPage),
+                    0x10,
+                ]);
+                cpu.reg.idx = 0x15;
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x10), 0x15);
+            }
+
+            #[test]
+            fn stx_zero_page_y() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(Instructions::StoreX, AddressingMode::ZeroPageY),
+                    0x10,
+                ]);
+                cpu.reg.idx = 0x15;
+                cpu.reg.idy = 0x25;
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x35), 0x15);
+            }
+
+            #[test]
+            fn stx_absolute() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(Instructions::StoreX, AddressingMode::Absolute),
+                    0x10,
+                    0x34,
+                ]);
+                cpu.reg.idx = 0x15;
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x3410), 0x15);
             }
         }
         mod sty {
+            use super::*;
             #[test]
-            fn sty() {
-                todo!();
+            fn sty_zero_page() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(Instructions::StoreY, AddressingMode::ZeroPage),
+                    0x10,
+                ]);
+                cpu.reg.idy = 0x15;
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x10), 0x15);
+            }
+
+            #[test]
+            fn sty_zero_page_x() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(Instructions::StoreY, AddressingMode::ZeroPageX),
+                    0x10,
+                ]);
+                cpu.reg.idy = 0x15;
+                cpu.reg.idx = 0x25;
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x35), 0x15);
+            }
+
+            #[test]
+            fn sty_absolute() {
+                let mut cpu = NesCpu::new_from_bytes(&[
+                    NesCpu::encode_instructions(Instructions::StoreY, AddressingMode::Absolute),
+                    0x10,
+                    0x34,
+                ]);
+                cpu.reg.idy = 0x15;
+                cpu.fetch_decode_next();
+                assert_eq!(cpu.memory.read_byte(0x3410), 0x15);
             }
         }
     }
