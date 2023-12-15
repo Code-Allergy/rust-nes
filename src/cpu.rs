@@ -7,7 +7,7 @@ use std::process::exit;
 pub const CLOCK_RATE: u32 = 21441960;
 
 // https://www.nesdev.org/wiki/2A03
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Registers {
     pub pc: u16,
     sp: u8,
@@ -19,7 +19,6 @@ pub struct Registers {
 
 impl Registers {
     fn new() -> Self {
-        // TODO
         Registers {
             pc: 0,
             sp: 0xFD,
@@ -30,16 +29,7 @@ impl Registers {
         }
     }
 }
-
-// TODO
-// Carry flag
-// zero flag
-// Interrupt disable
-// decimal mode
-// break command
-// overflow flag
-// negative flag
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct CPUFlags {
     carry: bool,
     zero: bool,
@@ -97,7 +87,6 @@ impl CPUFlags {
     }
 }
 
-#[derive(Clone)]
 pub struct NesCpu {
     pub memory: Memory,
     pub reg: Registers,
@@ -899,9 +888,9 @@ mod tests {
                     AddressingMode::Implied,
                 )]);
                 cpu.reg.accumulator = 0xAF;
-                assert_eq!(cpu.reg.sp, 0xFF);
+                let sp = cpu.reg.sp;
                 cpu.fetch_decode_next();
-                assert_eq!(cpu.reg.sp, 0xFE);
+                assert_eq!(cpu.reg.sp, sp - 1);
                 assert_eq!(cpu.pop_stack(), 0xAF);
             }
         }
@@ -914,10 +903,10 @@ mod tests {
                     AddressingMode::Implied,
                 )]);
                 cpu.reg.flags.set_byte(0xBF);
-                assert_eq!(cpu.reg.sp, 0xFF);
+                let sp = cpu.reg.sp;
                 cpu.fetch_decode_next();
-                assert_eq!(cpu.reg.sp, 0xFE);
-                assert_eq!(cpu.pop_stack(), 0xBF);
+                assert_eq!(cpu.reg.sp, sp - 1);
+                assert_eq!(cpu.pop_stack(), 0xAF);
             }
         }
         mod pla {
@@ -928,12 +917,12 @@ mod tests {
                     Instructions::PopAccOffStack,
                     AddressingMode::Implied,
                 )]);
-                assert_eq!(cpu.reg.sp, 0xFF);
+                let sp = cpu.reg.sp;
                 cpu.push_stack(0x05);
-                assert_eq!(cpu.reg.sp, 0xFE);
+                assert_eq!(cpu.reg.sp, sp - 1);
                 cpu.fetch_decode_next();
                 assert_eq!(cpu.reg.accumulator, 0x05);
-                assert_eq!(cpu.reg.sp, 0xFF);
+                assert_eq!(cpu.reg.sp, sp);
             }
             #[test]
             fn pla_zero() {
@@ -947,17 +936,17 @@ mod tests {
                         AddressingMode::Implied,
                     ),
                 ]);
-                assert_eq!(cpu.reg.sp, 0xFF);
+                let sp = cpu.reg.sp;
                 cpu.push_stack(0x1);
                 cpu.push_stack(0x0);
-                assert_eq!(cpu.reg.sp, 0xFD);
+                assert_eq!(cpu.reg.sp, sp - 2);
                 cpu.fetch_decode_next();
                 assert_eq!(cpu.reg.accumulator, 0x0);
                 assert!(cpu.reg.flags.zero);
                 cpu.fetch_decode_next();
                 assert_eq!(cpu.reg.accumulator, 0x1);
                 assert!(!cpu.reg.flags.zero);
-                assert_eq!(cpu.reg.sp, 0xFF);
+                assert_eq!(cpu.reg.sp, sp);
             }
             #[test]
             fn pla_negative() {
@@ -971,17 +960,17 @@ mod tests {
                         AddressingMode::Implied,
                     ),
                 ]);
-                assert_eq!(cpu.reg.sp, 0xFF);
+                let sp = cpu.reg.sp;
                 cpu.push_stack(0x74);
                 cpu.push_stack(0x84);
-                assert_eq!(cpu.reg.sp, 0xFD);
+                assert_eq!(cpu.reg.sp, sp - 2);
                 cpu.fetch_decode_next();
                 assert_eq!(cpu.reg.accumulator, 0x84);
                 assert!(cpu.reg.flags.negative);
                 cpu.fetch_decode_next();
                 assert_eq!(cpu.reg.accumulator, 0x74);
                 assert!(!cpu.reg.flags.negative);
-                assert_eq!(cpu.reg.sp, 0xFF);
+                assert_eq!(cpu.reg.sp, sp);
             }
         }
         mod plp {
@@ -992,12 +981,12 @@ mod tests {
                     Instructions::PullStatusFromStack,
                     AddressingMode::Implied,
                 )]);
-                assert_eq!(cpu.reg.sp, 0xFF);
+                let sp = cpu.reg.sp;
                 cpu.push_stack(0xFB);
-                assert_eq!(cpu.reg.sp, 0xFE);
+                assert_eq!(cpu.reg.sp, sp - 1);
                 cpu.fetch_decode_next();
-                assert_eq!(cpu.reg.flags.as_byte(), 0xFB);
-                assert_eq!(cpu.reg.sp, 0xFF);
+                assert_eq!(cpu.reg.flags.as_byte(), 0xEB);
+                assert_eq!(cpu.reg.sp, sp);
             }
         }
     }
@@ -1798,12 +1787,13 @@ mod tests {
                     0x80,
                     0x00,
                 ]);
+                let sp = cpu.reg.sp;
                 cpu.fetch_decode_next();
                 assert_eq!(cpu.reg.pc, 0x2020);
-                assert_eq!(cpu.reg.sp, 0xFD);
+                assert_eq!(cpu.reg.sp, sp - 2);
                 let address = cpu.pop_stack_u16();
                 assert_eq!(address, 0x8002);
-                assert_eq!(cpu.reg.sp, 0xFF);
+                assert_eq!(cpu.reg.sp, sp);
             }
         }
         mod bcc {
