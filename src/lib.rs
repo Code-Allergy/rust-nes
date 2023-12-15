@@ -6,6 +6,7 @@ pub mod cpu;
 pub mod instructions;
 pub mod memory;
 pub mod ppu;
+pub mod sdl;
 
 #[derive(Debug)]
 pub struct NesRom {
